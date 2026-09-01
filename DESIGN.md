@@ -3,10 +3,10 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-08-31
+- Last refreshed: 2026-09-01
 - Primary product surfaces: authenticated desktop/mobile file browser, directory list, favorites navigation, file preview, upload status
 - Evidence reviewed:
-  - `README.md` — single-user/Tailscale positioning, supported previews, responsive behavior, no-build deployment
+  - `README.md` / `README.zh-CN.md` — bilingual single-user positioning, supported previews, responsive behavior, and deployment instructions
   - `web_file_manager.py:609` — all frontend HTML, CSS, and JavaScript are embedded in one Python file
   - `web_file_manager.py:621` — Cloud Light is forced as the active application theme
   - `web_file_manager.py:1593` — canonical light shell, navigation, file-row, preview, and responsive CSS
@@ -14,7 +14,8 @@
   - `web_file_manager.py:2299` — flexible preview pane with persistent metadata/actions header
   - `web_file_manager.py:2639` — favorites render as stable navigation rather than list content
   - `web_file_manager.py:2908` — preview empty/selected state is explicit and mobile-aware
-- The original repository had no design brief, screenshot baseline, logo, or brand asset; this file now owns the design contract.
+  - `docs/screenshots/web-file-manager-demo.png` — 1440×900 desktop baseline captured from an isolated temporary HOME with fictional content
+- The original repository had no design brief, screenshot baseline, logo, or brand asset; this file now owns the design contract and the sanitized desktop baseline above.
 
 ## Brand
 
@@ -192,6 +193,7 @@ Recommended desktop shell:
 - Test/screenshot expectations:
   - Functional checks for favorites navigation, directory loading, file selection, upload, theme migration, and preview actions.
   - Visual baselines at 1440×900, 1024×768, and 390×844.
+  - README screenshots must be captured from an isolated temporary HOME with fictional files and audited for usernames, absolute paths, hostnames, and personal favorites before commit.
   - Keyboard/focus and reduced-motion checks before release.
 
 ## Open questions
