@@ -6,7 +6,9 @@
 
 ## 界面
 
-<img src="docs/screenshots/web-file-manager-demo.png" alt="Web File Manager Cloud Light 界面" width="600">
+<p align="center">
+  <img src="docs/screenshots/web-file-manager-demo.png" alt="Web File Manager Cloud Light 界面" width="800">
+</p>
 
 ## 功能
 

@@ -6,7 +6,9 @@ A lightweight single-user web file browser. The interface is rooted at the runni
 
 ## Interface
 
-<img src="docs/screenshots/web-file-manager-demo.png" alt="Web File Manager Cloud Light interface" width="600">
+<p align="center">
+  <img src="docs/screenshots/web-file-manager-demo.png" alt="Web File Manager Cloud Light interface" width="800">
+</p>
 
 ## Features
 
