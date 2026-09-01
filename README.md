@@ -74,4 +74,4 @@ systemctl --user enable --now webfilemanager.service
 - The service refuses to start when `WEBFM_AUTH` is not set.
 - The interface can access only content within `$HOME`; out-of-bounds paths and symlinks pointing outside `$HOME` return 403.
 - HTML previews treat files as trusted personal documents and do not use an iframe sandbox.
-- The service is suitable for a trusted LAN or Tailscale network and should not be exposed directly to the public internet.
+- The service is suitable for a trusted LAN or private overlay networks such as Nebula and Tailscale, and should not be exposed directly to the public internet.

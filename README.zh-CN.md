@@ -74,4 +74,4 @@ systemctl --user enable --now webfilemanager.service
 - 未设置 `WEBFM_AUTH` 时服务拒绝启动。
 - 界面只能访问 `$HOME` 内容；越界路径和指向 `$HOME` 外的符号链接返回 403。
 - HTML 预览按可信个人文档处理，不使用 iframe sandbox。
-- 服务适合可信 LAN 或 Tailscale 网络，不应直接暴露在公网。
+- 服务适合在可信 LAN 或 Nebula、Tailscale 等私有组网中使用，不应直接暴露在公网。
