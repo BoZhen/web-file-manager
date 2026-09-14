@@ -3,7 +3,7 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-09-01
+- Last refreshed: 2026-09-03
 - Primary product surfaces: authenticated desktop/mobile file browser, directory list, favorites navigation, file preview, upload status
 - Evidence reviewed:
   - `README.md` / `README.zh-CN.md` — bilingual single-user positioning, supported previews, responsive behavior, and deployment instructions
@@ -130,7 +130,8 @@ Recommended desktop shell:
   - `HiddenFilesToggle`: closed-eye icon means hidden files are not shown; open-eye icon means they are visible. Mirror the visual state with status text, `aria-pressed`, and an action-oriented accessible name.
   - `DirectoryHeader`: breadcrumb/path editor on one row; primary actions on a compact adjacent row or right side.
   - `FileList`/`FileRow`: aligned file-type icon, filename, metadata, and trailing favorite action shown on row hover/focus for directories.
-  - `PreviewHeader`: persistent filename, size/type metadata, Source toggle where applicable, and Download action.
+  - `PreviewHeader`: persistent filename, size/type metadata, Source toggle where applicable, Copy for textual source, and Download action.
+  - `CopyAction`: appears immediately left of Download for Markdown, HTML, text, and code; copies the complete source and reports loading, success, and error states without blocking the preview.
   - `PreviewCanvas`: content-only preview area with no metadata overlay.
   - `ActionMenu`: sorting, hidden-files toggle, and secondary preferences.
   - `UploadStatus`: bottom status strip in the file-list pane rather than content that shifts the list.
@@ -145,6 +146,7 @@ Recommended desktop shell:
 - Target standard: WCAG 2.1 AA for contrast, focus visibility, and keyboard operation.
 - Keyboard/focus behavior:
   - Every icon button has an accessible name and visible focus ring.
+  - Copy exposes its pending/result state through the button label, title, icon, and accessible name; the action remains explicit and user initiated.
   - File rows and favorite rows are keyboard reachable and activate with Enter/Space.
   - When a video is selected, Left/Right Arrow seeks backward/forward by 5 seconds and clamps at the media bounds.
   - Focus returns to the selected row when closing a mobile preview or menu.

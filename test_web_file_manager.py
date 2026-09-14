@@ -1,4 +1,5 @@
 import base64
+import json
 import re
 import tempfile
 import unittest
@@ -21,6 +22,18 @@ class IdCollector(HTMLParser):
         element_id = dict(attrs).get("id")
         if element_id:
             self.ids.append(element_id)
+
+
+class ConfigurationTest(unittest.TestCase):
+    def test_bind_addresses_support_multiple_interfaces(self):
+        self.assertEqual(
+            webfm._parse_bind_addresses("127.0.0.1, 192.168.1.10"),
+            ("127.0.0.1", "192.168.1.10"),
+        )
+        self.assertEqual(webfm._parse_bind_addresses(""), ("0.0.0.0",))
+
+    def test_latex_files_use_the_text_preview(self):
+        self.assertEqual(webfm._classify(Path("notes.tex")), "text")
 
 
 class FrontendContractTest(unittest.TestCase):
@@ -53,6 +66,7 @@ class FrontendContractTest(unittest.TestCase):
             "pane-left",
             "pane-right",
             "preview-title",
+            "preview-copy",
             "preview-download",
         }
         self.assertTrue(required_ids.issubset(self.ids))
@@ -120,6 +134,19 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("function typesetMarkdownMath(container)", webfm.HTML)
         self.assertIn("typesetMarkdownMath(body);", webfm.HTML)
 
+    def test_text_previews_offer_full_content_copy_before_download(self):
+        self.assertLess(
+            webfm.HTML.index('id="preview-copy"'),
+            webfm.HTML.index('id="preview-download"'),
+        )
+        self.assertIn(
+            'const COPYABLE_KINDS = new Set(["markdown", "html", "text"]);',
+            webfm.HTML,
+        )
+        self.assertIn("async function copyFullText(entry, button)", webfm.HTML)
+        self.assertIn('fileUrlFor(entry, "text", "&full=1")', webfm.HTML)
+        self.assertIn("navigator.clipboard.writeText(text)", webfm.HTML)
+
 
 class FileHandlerRangeTest(AsyncHTTPTestCase):
     DATA = b"0123456789abcdef"
@@ -128,15 +155,19 @@ class FileHandlerRangeTest(AsyncHTTPTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_home = webfm.HOME
         self.old_auth = webfm.AUTH
+        self.old_text_preview_cap = webfm.TEXT_PREVIEW_CAP
         webfm.HOME = Path(self.temp_dir.name).resolve()
         webfm.AUTH = "tester:secret"
+        webfm.TEXT_PREVIEW_CAP = 8
         (webfm.HOME / "sample.mp4").write_bytes(self.DATA)
+        (webfm.HOME / "sample.py").write_text("abcdefghijklmno", encoding="utf-8")
         super().setUp()
 
     def tearDown(self):
         super().tearDown()
         webfm.HOME = self.old_home
         webfm.AUTH = self.old_auth
+        webfm.TEXT_PREVIEW_CAP = self.old_text_preview_cap
         self.temp_dir.cleanup()
 
     def get_app(self):
@@ -200,6 +231,23 @@ class FileHandlerRangeTest(AsyncHTTPTestCase):
                     response.headers["Content-Range"],
                     f"bytes */{len(self.DATA)}",
                 )
+
+    def test_full_text_mode_bypasses_preview_truncation(self):
+        preview = self.fetch(
+            "/api/file?mode=text&path=/sample.py",
+            headers=self.auth_headers,
+        )
+        full = self.fetch(
+            "/api/file?mode=text&full=1&path=/sample.py",
+            headers=self.auth_headers,
+        )
+
+        preview_data = json.loads(preview.body)
+        full_data = json.loads(full.body)
+        self.assertTrue(preview_data["truncated"])
+        self.assertEqual(preview_data["content"], "abcdefgh")
+        self.assertFalse(full_data["truncated"])
+        self.assertEqual(full_data["content"], "abcdefghijklmno")
 
 
 if __name__ == "__main__":

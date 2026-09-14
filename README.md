@@ -22,6 +22,7 @@ A lightweight single-user web file browser. The interface is rooted at the runni
 - PDFs open in the local PDF.js viewer.
 - Markdown supports syntax highlighting and `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` LaTeX formulas.
 - HTML files support webpage preview and source switching; text and code files support syntax highlighting.
+- Markdown, HTML, text, and code previews provide a Copy action that copies the complete source, including content beyond the preview limit.
 - Drag-and-drop uploads, multiple-file uploads, and file downloads are supported.
 - On narrow screens, the file list and preview area are shown separately, and the preview page provides a button to return to the list.
 
@@ -39,6 +40,7 @@ By default, it listens on `0.0.0.0:7701`.
 |---|---|---|
 | `WEBFM_AUTH` | Required | HTTP Basic credentials in `user:pass` format |
 | `WEBFM_PORT` | `7701` | Listening port |
+| `WEBFM_BIND` | `0.0.0.0` | Comma-separated listening addresses |
 | `WEBFM_CONFIG_DIR` | `~/.config/web-file-manager` | Configuration directory |
 | `WEBFM_FAVORITES_FILE` | `$WEBFM_CONFIG_DIR/favorites.json` | Favorites data file |
 

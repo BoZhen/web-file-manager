@@ -14,11 +14,18 @@ from urllib.parse import quote
 import tornado.ioloop
 import tornado.web
 
+
+def _parse_bind_addresses(raw):
+    addresses = tuple(address.strip() for address in raw.split(",") if address.strip())
+    return addresses or ("0.0.0.0",)
+
+
 HOME = Path.home().resolve()
 PROJECT_DIR = Path(__file__).resolve().parent
 PDFJS_DIR = PROJECT_DIR / "pdfjs"
 MATHJAX_DIR = PROJECT_DIR / "mathjax"
 PORT = int(os.environ.get("WEBFM_PORT", "7701"))
+BIND_ADDRESSES = _parse_bind_addresses(os.environ.get("WEBFM_BIND", "0.0.0.0"))
 AUTH = os.environ.get("WEBFM_AUTH", "")  # user:pass — REQUIRED
 CONFIG_DIR = Path(os.environ.get("WEBFM_CONFIG_DIR", str(HOME / ".config" / "web-file-manager"))).expanduser()
 FAVORITES_FILE = Path(os.environ.get("WEBFM_FAVORITES_FILE", str(CONFIG_DIR / "favorites.json"))).expanduser()
@@ -339,6 +346,7 @@ class FileHandler(BasicAuthMixin, tornado.web.RequestHandler):
         rel = self.get_argument("path", "")
         mode = self.get_argument("mode", "raw")
         force = self.get_argument("force", "0") == "1"
+        full = self.get_argument("full", "0") == "1"
         try:
             target = _safe_resolve(rel)
         except ValueError:
@@ -351,7 +359,7 @@ class FileHandler(BasicAuthMixin, tornado.web.RequestHandler):
             return
 
         if mode == "text":
-            self._serve_text(target, force=force)
+            self._serve_text(target, force=force, full=full)
             return
 
         ctype, _ = mimetypes.guess_type(target.name)
@@ -403,17 +411,18 @@ class FileHandler(BasicAuthMixin, tornado.web.RequestHandler):
                 await self.flush()
                 remaining -= len(chunk)
 
-    def _serve_text(self, target: Path, force: bool):
+    def _serve_text(self, target: Path, force: bool, full: bool = False):
         size = target.stat().st_size
-        read_n = min(size, TEXT_PREVIEW_CAP)
         with open(target, "rb") as f:
+            sample = f.read(min(size, 8192))
+            if not force and _looks_binary(sample):
+                self.set_header("Content-Type", "application/json")
+                self.write({"binary": True, "size": size})
+                return
+            f.seek(0)
+            read_n = size if full else min(size, TEXT_PREVIEW_CAP)
             raw = f.read(read_n)
-        truncated = size > read_n
-
-        if not force and _looks_binary(raw[:8192]):
-            self.set_header("Content-Type", "application/json")
-            self.write({"binary": True, "size": size})
-            return
+        truncated = not full and size > read_n
 
         content = None
         encoding = None
@@ -1646,6 +1655,8 @@ document.documentElement.dataset.theme = "cloud-light";
     font-weight: 600;
   }
   .text-button:hover { background: var(--hover); }
+  #preview-copy[data-copy-state="success"] { color: var(--success); }
+  #preview-copy[data-copy-state="error"] { color: var(--danger); }
   .primary-button {
     height: 36px;
     display: inline-flex;
@@ -2221,6 +2232,8 @@ document.documentElement.dataset.theme = "cloud-light";
   </symbol>
   <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></symbol>
   <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v13M7 11l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
   <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></symbol>
   <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
 </svg>
@@ -2314,6 +2327,11 @@ document.documentElement.dataset.theme = "cloud-light";
       <button class="text-button" id="preview-toggle" type="button" hidden>
         <svg class="ui-icon"><use href="#icon-code"></use></svg>
         <span class="button-label">源码</span>
+      </button>
+      <button class="text-button" id="preview-copy" type="button" title="复制全部内容"
+              aria-label="复制全部内容" data-copy-state="idle" hidden>
+        <svg class="ui-icon" aria-hidden="true"><use id="preview-copy-icon" href="#icon-copy"></use></svg>
+        <span class="button-label">复制</span>
       </button>
       <button class="text-button" id="preview-download" type="button" hidden>
         <svg class="ui-icon"><use href="#icon-download"></use></svg>
@@ -2918,6 +2936,85 @@ const KIND_LABEL = {
   image: "图片", video: "视频", pdf: "PDF", markdown: "Markdown",
   html: "HTML", text: "文本", other: "文件",
 };
+const COPYABLE_KINDS = new Set(["markdown", "html", "text"]);
+let copyResetTimer = null;
+
+function setCopyButtonState(button, copyState) {
+  const labels = {
+    idle: ["复制", "复制全部内容"],
+    loading: ["复制中", "正在复制全部内容"],
+    success: ["已复制", "已复制全部内容"],
+    error: ["复制失败", "复制失败，请重试"],
+  };
+  const [label, description] = labels[copyState] || labels.idle;
+  button.dataset.copyState = copyState;
+  button.disabled = copyState === "loading";
+  button.title = description;
+  button.setAttribute("aria-label", description);
+  const text = button.querySelector(".button-label");
+  if (text) text.textContent = label;
+  $("preview-copy-icon").setAttribute(
+    "href",
+    copyState === "success" ? "#icon-check" : "#icon-copy",
+  );
+}
+
+function resetCopyButton(button) {
+  if (copyResetTimer) window.clearTimeout(copyResetTimer);
+  copyResetTimer = null;
+  button.onclick = null;
+  setCopyButtonState(button, "idle");
+}
+
+function copyTextWithSelection(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.style.cssText = "position:fixed;inset:-9999px auto auto -9999px;opacity:0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+  if (!copied) throw new Error("Clipboard API unavailable");
+}
+
+async function writeClipboardText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      console.warn("Clipboard API failed, using selection fallback", error);
+    }
+  }
+  copyTextWithSelection(text);
+}
+
+async function copyFullText(entry, button) {
+  if (copyResetTimer) window.clearTimeout(copyResetTimer);
+  copyResetTimer = null;
+  setCopyButtonState(button, "loading");
+  try {
+    const data = await api(fileUrlFor(entry, "text", "&full=1"));
+    if (data.binary) throw new Error("File is not text");
+    await writeClipboardText(data.content || "");
+    if (state.selected !== entry.name) return;
+    setCopyButtonState(button, "success");
+  } catch (error) {
+    console.error("复制失败", error);
+    if (state.selected !== entry.name) return;
+    setCopyButtonState(button, "error");
+  }
+  copyResetTimer = window.setTimeout(() => {
+    if (state.selected === entry.name) setCopyButtonState(button, "idle");
+    copyResetTimer = null;
+  }, 1600);
+}
 
 function emptyPreviewMarkup() {
   return `<div class="empty-state">
@@ -2935,6 +3032,9 @@ function resetPreview() {
   $("preview-meta").textContent = "选择一个文件，在这里查看内容";
   $("preview-toggle").hidden = true;
   $("preview-toggle").onclick = null;
+  const copy = $("preview-copy");
+  copy.hidden = true;
+  resetCopyButton(copy);
   $("preview-download").hidden = true;
   $("preview-download").onclick = null;
   $("app").classList.remove("preview-open");
@@ -2957,6 +3057,10 @@ function renderPreview(entry) {
 
   $("preview-title").textContent = entry.name;
   $("preview-meta").textContent = `${KIND_LABEL[entry.kind] || "文件"} · ${fmtSize(entry.size)} · ${fmtTime(entry.mtime)}`;
+  const copy = $("preview-copy");
+  resetCopyButton(copy);
+  copy.hidden = !COPYABLE_KINDS.has(entry.kind);
+  if (!copy.hidden) copy.onclick = () => copyFullText(entry, copy);
   const download = $("preview-download");
   download.hidden = false;
   download.onclick = () => { window.location.href = fileUrlFor(entry, "download"); };
@@ -3633,8 +3737,12 @@ def main():
         (r"/mathjax/(.*)", AuthStaticHandler, {"path": str(MATHJAX_DIR)}),
         (r"/(.*)", IndexHandler),
     ])
-    app.listen(PORT, address="0.0.0.0", max_body_size=MAX_UPLOAD_BYTES)
-    print(f"Web file manager running at http://0.0.0.0:{PORT}")
+    servers = [
+        app.listen(PORT, address=address, max_body_size=MAX_UPLOAD_BYTES)
+        for address in BIND_ADDRESSES
+    ]
+    for address in BIND_ADDRESSES:
+        print(f"Web file manager running at http://{address}:{PORT}")
     print(f"Root: {HOME}")
     print(f"Auth: enabled (user={AUTH.split(':', 1)[0]})")
     tornado.ioloop.IOLoop.current().start()

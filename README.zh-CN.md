@@ -22,6 +22,7 @@
 - PDF 使用本地 PDF.js 查看器打开。
 - Markdown 支持语法高亮和 `$...$`、`$$...$$`、`\(...\)`、`\[...\]` LaTeX 公式。
 - HTML 文件支持网页预览和源码切换；文本与代码文件支持语法高亮。
+- Markdown、HTML、文本和代码预览提供“复制”操作，可复制包括预览上限之外内容在内的完整源文。
 - 支持拖放上传、多文件上传和文件下载。
 - 窄屏下文件列表和预览区分别显示，预览页提供返回列表按钮。
 
@@ -39,6 +40,7 @@ WEBFM_AUTH="<user>:<strong-password>" python web_file_manager.py
 |---|---|---|
 | `WEBFM_AUTH` | 必填 | HTTP Basic 凭证，格式为 `user:pass` |
 | `WEBFM_PORT` | `7701` | 监听端口 |
+| `WEBFM_BIND` | `0.0.0.0` | 逗号分隔的监听地址 |
 | `WEBFM_CONFIG_DIR` | `~/.config/web-file-manager` | 配置目录 |
 | `WEBFM_FAVORITES_FILE` | `$WEBFM_CONFIG_DIR/favorites.json` | 收藏夹数据文件 |
 
