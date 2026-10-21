@@ -250,5 +250,104 @@ class FileHandlerRangeTest(AsyncHTTPTestCase):
         self.assertEqual(full_data["content"], "abcdefghijklmno")
 
 
+class ExtraRootTest(AsyncHTTPTestCase):
+    """A directory outside HOME (WEBFM_EXTRA_ROOTS) is browsable read-only under its
+    own namespace segment, and never confused with a HOME directory of the same name."""
+
+    PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        base = Path(self.temp_dir.name).resolve()
+        self.old = (webfm.HOME, webfm.AUTH, webfm.EXTRA_ROOTS)
+        webfm.HOME = base / "home"
+        self.extra = base / "scratch"
+        self.outside = base / "elsewhere"
+        for d in (webfm.HOME / "tmp", self.extra / "sub", self.outside):
+            d.mkdir(parents=True)
+        webfm.AUTH = "tester:secret"
+        webfm.EXTRA_ROOTS = [str(self.extra)]
+        self.seg = ":" + str(self.extra).strip("/").replace("/", ":")
+        (self.extra / "plot.png").write_bytes(self.PNG)
+        (webfm.HOME / "tmp" / "mine.txt").write_text("home tmp", encoding="utf-8")
+        (self.outside / "secret.txt").write_text("no", encoding="utf-8")
+        (self.extra / "to-outside").symlink_to(self.outside / "secret.txt")
+        (self.extra / "to-home").symlink_to(webfm.HOME / "tmp")
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        webfm.HOME, webfm.AUTH, webfm.EXTRA_ROOTS = self.old
+        self.temp_dir.cleanup()
+
+    def get_app(self):
+        return tornado.web.Application([
+            (r"/", webfm.IndexHandler),
+            (r"/api/list", webfm.ListHandler),
+            (r"/api/file", webfm.FileHandler),
+            (r"/api/upload", webfm.UploadHandler),
+        ])
+
+    @property
+    def auth(self):
+        return {"Authorization": "Basic " + base64.b64encode(webfm.AUTH.encode()).decode()}
+
+    def get_json(self, url):
+        r = self.fetch(url, headers=self.auth)
+        return r.code, json.loads(r.body or b"{}")
+
+    def test_listing_the_extra_root(self):
+        code, data = self.get_json("/api/list?path=/" + self.seg)
+        self.assertEqual(code, 200)
+        self.assertEqual(data["path"], "/" + self.seg)
+        self.assertEqual(data["parent"], "/")
+        names = [e["name"] for e in data["entries"]]
+        self.assertIn("plot.png", names)
+        self.assertIn("sub", names)
+        self.assertIn("to-home", names)          # resolves into HOME: allowed
+        self.assertNotIn("to-outside", names)    # resolves elsewhere: hidden
+
+    def test_file_in_the_extra_root_is_served(self):
+        r = self.fetch("/api/file?mode=raw&path=/%s/plot.png" % self.seg, headers=self.auth)
+        self.assertEqual(r.code, 200)
+        self.assertEqual(r.body, self.PNG)
+
+    def test_escapes_are_refused(self):
+        for path in ("/%s/../elsewhere/secret.txt" % self.seg, "/%s/to-outside" % self.seg, "/../elsewhere/secret.txt"):
+            r = self.fetch("/api/file?mode=raw&path=" + path, headers=self.auth)
+            self.assertEqual(r.code, 403, path)
+
+    def test_home_tmp_keeps_its_meaning(self):
+        code, data = self.get_json("/api/list?path=/tmp")
+        self.assertEqual(code, 200)
+        self.assertEqual(data["path"], "/tmp")
+        self.assertEqual([e["name"] for e in data["entries"]], ["mine.txt"])
+
+    def test_symlink_into_home_maps_back_to_home_paths(self):
+        code, data = self.get_json("/api/list?path=/%s/to-home" % self.seg)
+        self.assertEqual(code, 200)
+        self.assertEqual(data["path"], "/tmp")
+
+    def test_extra_root_is_read_only(self):
+        body = (b"--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"x.txt\"\r\n\r\nhi\r\n--B--\r\n")
+        headers = dict(self.auth, **{"Content-Type": "multipart/form-data; boundary=B"})
+        r = self.fetch("/api/upload?path=/" + self.seg, method="POST", body=body, headers=headers)
+        self.assertEqual(r.code, 403)
+        self.assertFalse((self.extra / "x.txt").exists())
+        r = self.fetch("/api/upload?path=/tmp", method="POST", body=body, headers=headers)
+        self.assertEqual(r.code, 200)
+        self.assertTrue((webfm.HOME / "tmp" / "x.txt").exists())
+
+    def test_roots_inside_home_and_the_filesystem_root_are_ignored(self):
+        webfm.EXTRA_ROOTS = [str(webfm.HOME / "tmp"), "/", str(self.extra)]
+        self.assertEqual(list(webfm._mounts()), [self.seg])
+
+    def test_page_carries_the_roots(self):
+        r = self.fetch("/", headers=self.auth)
+        html = r.body.decode()
+        self.assertNotIn("__WEBFM_ROOTS_JSON__", html)
+        self.assertIn(json.dumps([{"seg": self.seg, "path": str(self.extra)}]), html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,7 @@
 - 文件侧栏可调整宽度，也可通过按钮或 `B` 键整体收起。
 - 收藏夹默认折叠；目录行的星标用于添加或取消收藏。
 - 隐藏文件开关使用闭眼和睁眼图标表示当前状态。
-- 路径栏支持粘贴 `$HOME` 内的绝对路径，也支持 `/?open=<path>` 深链接。
+- 路径栏支持粘贴 `$HOME` 或额外根目录（如 `/tmp`）内的绝对路径，也支持 `/?open=<path>` 深链接。
 - 图片支持预览和同目录左右切换。
 - 视频使用浏览器原生播放器，默认静音，支持拖动进度和 `←` / `→` 后退或前进 5 秒。可播放的编码取决于浏览器。
 - PDF 使用本地 PDF.js 查看器打开。
@@ -43,6 +43,7 @@ WEBFM_AUTH="<user>:<strong-password>" python web_file_manager.py
 | `WEBFM_BIND` | `0.0.0.0` | 逗号分隔的监听地址 |
 | `WEBFM_CONFIG_DIR` | `~/.config/web-file-manager` | 配置目录 |
 | `WEBFM_FAVORITES_FILE` | `$WEBFM_CONFIG_DIR/favorites.json` | 收藏夹数据文件 |
+| `WEBFM_EXTRA_ROOTS` | `/tmp` | 逗号分隔、可只读浏览的 `$HOME` 之外的目录；设为空即关闭 |
 
 ## systemd 用户服务
 
@@ -74,6 +75,7 @@ systemctl --user enable --now webfilemanager.service
 ## 运行边界
 
 - 未设置 `WEBFM_AUTH` 时服务拒绝启动。
-- 界面只能访问 `$HOME` 内容；越界路径和指向 `$HOME` 外的符号链接返回 403。
+- 界面只能访问 `$HOME` 和 `WEBFM_EXTRA_ROOTS` 目录中的内容；越界路径和指向它们之外的符号链接返回 403。
+- 额外目录是只读的：向其中上传返回 403。每个额外目录在路径栏里是独立的根，所以 `/tmp` 与 `~/tmp` 互不混淆，`/?open=/tmp/...` 链接打开的是 `/tmp` 里的文件。
 - HTML 预览按可信个人文档处理，不使用 iframe sandbox。
 - 服务适合在可信 LAN 或 Nebula、Tailscale 等私有组网中使用，不应直接暴露在公网。

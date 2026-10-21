@@ -16,7 +16,7 @@ A lightweight single-user web file browser. The interface is rooted at the runni
 - The file sidebar width can be adjusted, and the entire sidebar can be collapsed using the button or the `B` key.
 - Favorites are collapsed by default; the star on a directory row adds or removes it from favorites.
 - The hidden-file toggle uses closed-eye and open-eye icons to indicate its current state.
-- The path bar accepts absolute paths within `$HOME` and supports `/?open=<path>` deep links.
+- The path bar accepts absolute paths within `$HOME` or an extra root such as `/tmp`, and supports `/?open=<path>` deep links.
 - Images support previews and left/right navigation within the same directory.
 - Videos use the browser’s native player, muted by default, with progress seeking and 5-second backward/forward jumps using `←` / `→`. Supported codecs depend on the browser.
 - PDFs open in the local PDF.js viewer.
@@ -43,6 +43,7 @@ By default, it listens on `0.0.0.0:7701`.
 | `WEBFM_BIND` | `0.0.0.0` | Comma-separated listening addresses |
 | `WEBFM_CONFIG_DIR` | `~/.config/web-file-manager` | Configuration directory |
 | `WEBFM_FAVORITES_FILE` | `$WEBFM_CONFIG_DIR/favorites.json` | Favorites data file |
+| `WEBFM_EXTRA_ROOTS` | `/tmp` | Comma-separated directories outside `$HOME` that can be browsed read-only; empty turns this off |
 
 ## systemd User Service
 
@@ -74,6 +75,7 @@ systemctl --user enable --now webfilemanager.service
 ## Operating Boundaries
 
 - The service refuses to start when `WEBFM_AUTH` is not set.
-- The interface can access only content within `$HOME`; out-of-bounds paths and symlinks pointing outside `$HOME` return 403.
+- The interface can access only content within `$HOME` and the `WEBFM_EXTRA_ROOTS` directories; out-of-bounds paths and symlinks pointing outside them return 403.
+- The extra directories are read-only: uploads into them return 403. Each appears as its own breadcrumb root, so `/tmp` and `~/tmp` stay distinct, and a `/?open=/tmp/...` link opens the file in `/tmp`.
 - HTML previews treat files as trusted personal documents and do not use an iframe sandbox.
 - The service is suitable for a trusted LAN or private overlay networks such as Nebula and Tailscale, and should not be exposed directly to the public internet.

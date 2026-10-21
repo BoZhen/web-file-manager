@@ -27,6 +27,11 @@ MATHJAX_DIR = PROJECT_DIR / "mathjax"
 PORT = int(os.environ.get("WEBFM_PORT", "7701"))
 BIND_ADDRESSES = _parse_bind_addresses(os.environ.get("WEBFM_BIND", "0.0.0.0"))
 AUTH = os.environ.get("WEBFM_AUTH", "")  # user:pass — REQUIRED
+# Directories outside HOME that can be browsed, read-only. /tmp by default:
+# coding agents leave images and reports there for the user to look at. Each one
+# is a top-level segment of the path namespace, ":" and its path with the slashes
+# as colons (/tmp is ":tmp"), so it cannot be confused with ~/tmp.
+EXTRA_ROOTS = [p.strip() for p in os.environ.get("WEBFM_EXTRA_ROOTS", "/tmp").split(",") if p.strip()]
 CONFIG_DIR = Path(os.environ.get("WEBFM_CONFIG_DIR", str(HOME / ".config" / "web-file-manager"))).expanduser()
 FAVORITES_FILE = Path(os.environ.get("WEBFM_FAVORITES_FILE", str(CONFIG_DIR / "favorites.json"))).expanduser()
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
@@ -89,18 +94,60 @@ def _classify(p: Path) -> str:
     return "other"
 
 
+def _mounts():
+    """{namespace segment: resolved directory} for the extra roots. A root inside
+    HOME is left out (it is reachable already), and so is the filesystem root."""
+    out = {}
+    for raw in EXTRA_ROOTS:
+        try:
+            root = Path(raw).expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if root == Path(root.anchor) or root == HOME or HOME in root.parents:
+            continue
+        out[":" + str(root).strip("/").replace("/", ":")] = root
+    return out
+
+
+def _mount_of(p: Path):
+    """(segment, root) of the extra root holding p, or None."""
+    for seg, root in _mounts().items():
+        if p == root or root in p.parents:
+            return seg, root
+    return None
+
+
+def _in_home(p: Path) -> bool:
+    return p == HOME or HOME in p.parents
+
+
+def _allowed(p: Path) -> bool:
+    return _in_home(p) or _mount_of(p) is not None
+
+
 def _safe_resolve(rel: str) -> Path:
-    """Resolve a request path relative to HOME. Raises ValueError on escape."""
+    """Resolve a request path: relative to HOME, or to an extra root when its first
+    segment names one. Raises ValueError when the result lies outside all of them,
+    symlinks included."""
     rel = (rel or "").lstrip("/")
-    target = (HOME / rel).resolve(strict=False)
-    target.relative_to(HOME)  # raises ValueError if outside HOME
+    seg, _, rest = rel.partition("/")
+    root = _mounts().get(seg)
+    target = ((root / rest) if root else (HOME / rel)).resolve(strict=False)
+    if not _allowed(target):
+        raise ValueError("path escapes root")
     return target
 
 
 def _to_rel(p: Path) -> str:
-    r = p.relative_to(HOME)
-    s = str(r)
-    return "/" if s == "." else "/" + s
+    if _in_home(p):
+        s = str(p.relative_to(HOME))
+        return "/" if s == "." else "/" + s
+    m = _mount_of(p)
+    if not m:
+        raise ValueError("path escapes root")
+    seg, root = m
+    s = str(p.relative_to(root))
+    return "/" + seg + ("" if s == "." else "/" + s)
 
 
 def _load_favorites():
@@ -151,7 +198,7 @@ def _favorite_entries():
             continue
         entries.append({
             "path": _to_rel(target),
-            "name": "~" if target == HOME else target.name,
+            "name": "~" if target == HOME else (str(target) if target in _mounts().values() else target.name),
             "mtime": int(st.st_mtime),
         })
     return entries
@@ -237,7 +284,9 @@ class IndexHandler(BasicAuthMixin, tornado.web.RequestHandler):
             return
         self.set_header("Content-Type", "text/html; charset=utf-8")
         self.set_header("Cache-Control", "no-store")
-        self.write(HTML.replace("__WEBFM_HOME_JSON__", json.dumps(str(HOME))))
+        roots = [{"seg": seg, "path": str(root)} for seg, root in _mounts().items()]
+        self.write(HTML.replace("__WEBFM_HOME_JSON__", json.dumps(str(HOME)))
+                       .replace("__WEBFM_ROOTS_JSON__", json.dumps(roots)))
 
 
 class ListHandler(BasicAuthMixin, tornado.web.RequestHandler):
@@ -262,9 +311,8 @@ class ListHandler(BasicAuthMixin, tornado.web.RequestHandler):
             for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
                 try:
                     real = child.resolve(strict=False)
-                    real.relative_to(HOME)  # skip entries that escape
-                except ValueError:
-                    continue
+                    if not _allowed(real):  # skip entries that escape
+                        continue
                 except OSError:
                     continue
                 try:
@@ -288,7 +336,12 @@ class ListHandler(BasicAuthMixin, tornado.web.RequestHandler):
             return
 
         rel_from_home = _to_rel(target)
-        parent = _to_rel(target.parent) if target != HOME else None
+        if target == HOME:
+            parent = None
+        elif target in _mounts().values():
+            parent = "/"          # up from an extra root is HOME, not the directory above it
+        else:
+            parent = _to_rel(target.parent)
 
         self.set_header("Content-Type", "application/json")
         self.write({"path": rel_from_home, "parent": parent, "entries": entries})
@@ -587,6 +640,10 @@ class UploadHandler(BasicAuthMixin, tornado.web.RequestHandler):
         if not target_dir.exists() or not target_dir.is_dir():
             self.set_status(404)
             self.write({"error": "not a directory"})
+            return
+        if not _in_home(target_dir):
+            self.set_status(403)
+            self.write({"error": "read-only location"})
             return
 
         files = self.request.files.get("file", [])
@@ -1980,6 +2037,7 @@ document.documentElement.dataset.theme = "cloud-light";
     background: var(--panel);
   }
   .listing.dragover::before { content: "松开以上传文件"; }
+  label.btn.readonly { opacity: .45; cursor: not-allowed; }
   .row, .row.dir {
     min-height: 42px;
     display: grid;
@@ -2353,6 +2411,16 @@ document.documentElement.dataset.theme = "cloud-light";
 <script>
 const MOBILE_QUERY = window.matchMedia("(max-width: 820px)");
 const HOME_PATH = __WEBFM_HOME_JSON__;
+// directories outside HOME, read-only: [{seg: ":tmp", path: "/tmp"}]. A path in
+// one of them starts with its seg ("/:tmp/a.png"), so it never reads as ~/tmp.
+const EXTRA_ROOTS = __WEBFM_ROOTS_JSON__;
+function rootForAbsolute(p) {
+  return EXTRA_ROOTS.find(r => p === r.path || p.startsWith(r.path + "/"));
+}
+function rootForPath(p) {
+  const seg = (p || "").split("/").filter(Boolean)[0] || "";
+  return EXTRA_ROOTS.find(r => r.seg === seg);
+}
 const SIDEBAR_WIDTH_KEY = "wfm-sidebar-width";
 const NAV_COLLAPSED_KEY = "wfm-browser-sidebar-collapsed-v3";
 const SIDEBAR_DEFAULT_WIDTH = 440;
@@ -2462,10 +2530,17 @@ function normalizeExternalPath(input) {
   p = decodePathText(p.split("#", 1)[0].split("?", 1)[0]);
   if (HOME_PATH && (p === HOME_PATH || p === HOME_PATH + "/")) return "/";
   if (HOME_PATH && p.startsWith(HOME_PATH + "/")) return p.slice(HOME_PATH.length) || "/";
+  const root = p.startsWith("/") ? rootForAbsolute(p) : null;
+  if (root) return "/" + root.seg + p.slice(root.path.length);
   return normalizePath(p);
 }
 
 function pathForEditing(path) {
+  const root = rootForPath(path);
+  if (root) {
+    const rest = path.split("/").filter(Boolean).slice(1).join("/");
+    return root.path + "/" + rest;
+  }
   if (!HOME_PATH) return path === "/" ? "/" : path;
   return path === "/" ? HOME_PATH + "/" : HOME_PATH + path;
 }
@@ -2614,15 +2689,17 @@ function buildCrumbs(path) {
       sep.className = "sep"; sep.textContent = "/";
       c.appendChild(sep);
       acc += "/" + p;
+      const root = i === 0 ? rootForPath(acc) : null;
+      const text = root ? root.path : p;
       if (i === parts.length - 1) {
         const cur = document.createElement("span");
-        cur.className = "current"; cur.textContent = p;
+        cur.className = "current"; cur.textContent = text;
         cur.title = "点击输入路径";
         cur.onclick = enterPathEditMode;
         c.appendChild(cur);
       } else {
         const a = document.createElement("a");
-        a.href = "#"; a.textContent = p;
+        a.href = "#"; a.textContent = text;
         const target = acc;
         a.onclick = (e) => { e.preventDefault(); load(target); };
         c.appendChild(a);
@@ -2649,6 +2726,8 @@ function visibleEntries() {
 function labelForPath(path) {
   if (!path || path === "/") return "主目录";
   const parts = path.split("/").filter(Boolean);
+  const root = parts.length === 1 ? rootForPath(path) : null;
+  if (root) return root.path;
   return parts[parts.length - 1] || path;
 }
 
@@ -2867,6 +2946,7 @@ async function load(path, opts) {
     const previousEntry = previousSelected ? entryByName(previousSelected) : null;
     state.cwd = data.path || "/";
     state.entries = data.entries || [];
+    syncUploadable();
     const refreshedEntry = previousSelected
       ? state.entries.find(entry => entry.name === previousSelected && !entry.is_dir)
       : null;
@@ -3677,6 +3757,16 @@ function uploadFiles(files) {
   });
 }
 
+// an extra root (/tmp) is read-only: the server refuses uploads there, so the
+// control says so instead of failing with 403
+function syncUploadable() {
+  const readOnly = Boolean(rootForPath(state.cwd));
+  const input = $("upload-input"), label = input.closest("label");
+  input.disabled = readOnly;
+  label.classList.toggle("readonly", readOnly);
+  label.title = readOnly ? "只读目录，不能上传" : "上传文件";
+}
+
 $("upload-input").addEventListener("change", (e) => {
   uploadFiles(e.target.files);
   e.target.value = "";
@@ -3685,6 +3775,7 @@ $("upload-input").addEventListener("change", (e) => {
 const listing = $("listing");
 listing.addEventListener("dragover", (e) => {
   e.preventDefault();
+  if (rootForPath(state.cwd)) return;
   listing.classList.add("dragover");
 });
 listing.addEventListener("dragleave", (e) => {
@@ -3693,7 +3784,7 @@ listing.addEventListener("dragleave", (e) => {
 listing.addEventListener("drop", (e) => {
   e.preventDefault();
   listing.classList.remove("dragover");
-  if (e.dataTransfer.files) uploadFiles(e.dataTransfer.files);
+  if (e.dataTransfer.files && !rootForPath(state.cwd)) uploadFiles(e.dataTransfer.files);
 });
 // Suppress browser default drag-drop on the whole window (would otherwise navigate away)
 window.addEventListener("dragover", (e) => e.preventDefault());
