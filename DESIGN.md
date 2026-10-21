@@ -3,12 +3,12 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-09-03
+- Last refreshed: 2026-10-21
 - Primary product surfaces: authenticated desktop/mobile file browser, directory list, favorites navigation, file preview, upload status
 - Evidence reviewed:
   - `README.md` / `README.zh-CN.md` — bilingual single-user positioning, supported previews, responsive behavior, and deployment instructions
   - `web_file_manager.py:609` — all frontend HTML, CSS, and JavaScript are embedded in one Python file
-  - `web_file_manager.py:621` — Cloud Light is forced as the active application theme
+  - `web_file_manager.py` `THEMES` / `WEBFM_THEME` and the page's head script — the theme a browser saved from the sidebar menu, else the server default (Darcula), applies before the first paint
   - `web_file_manager.py:1593` — canonical light shell, navigation, file-row, preview, and responsive CSS
   - `web_file_manager.py` — unified resizable browser sidebar containing collapsed Favorites, path controls, and the current directory
   - `web_file_manager.py:2299` — flexible preview pane with persistent metadata/actions header
@@ -29,11 +29,11 @@
   - Make the current directory, file list, favorites, and preview visually distinct at a glance.
   - Keep Favorites as the only shortcut section inside the same collapsible browser sidebar as the active directory.
   - Maximize preview space while keeping file metadata and actions consistently available.
-  - Use one coherent light visual system by default.
+  - Use one coherent visual system: Darcula by default, with the same layout and semantic tokens in every theme.
   - Preserve the directness and speed of the existing single-page application.
 - Non-goals:
   - Cloud-drive collaboration, sharing, comments, version history, or account management.
-  - A large theme gallery in the primary interface.
+  - A large theme gallery in the primary interface; theme choice stays one compact menu in the sidebar footer.
   - Thumbnail-grid view, global search, or bulk file operations in the first redesign pass.
   - Replacing the existing backend or introducing a frontend build system.
 - Success signals:
@@ -100,7 +100,7 @@ Recommended desktop shell:
 
 ## Visual language
 
-- Color: use the `Cloud Light` palette as the default and primary supported appearance.
+- Color: `Darcula` is the default palette (`WEBFM_THEME`). `Cloud Light` remains the reference light palette; its values below are unchanged.
   - Canvas: `#F5F7FA`
   - Navigation surface: `#F8FAFC`
   - Primary surface: `#FFFFFF`
@@ -186,14 +186,14 @@ Recommended desktop shell:
 
 - Framework/styling system: retain Tornado plus embedded vanilla HTML/CSS/JavaScript in `web_file_manager.py`; no build step.
 - Design-token constraints:
-  - Introduce semantic light tokens rather than editing each of the existing twelve palettes independently.
-  - `Cloud Light` is the only user-facing theme. Legacy saved theme values are intentionally ignored.
-  - Code preview uses the light GitHub highlight.js stylesheet.
+  - Component colors come from semantic tokens: `--item-text`, `--item-faint`, `--item-sep`, `--item-line`, `--item-selected-text`, `--item-selected-border`, `--doc-icon`, `--badge-bg`, `--danger-bg`, `--header-bg`. One shared `:root` rule derives them from each palette; Cloud Light sets its original values exactly. Dark themes take `--item-faint` halfway between `--muted` and `--text`, because their `--muted` is a comment color too dim for sizes and dates.
+  - All thirteen palettes are user-facing through the sidebar theme menu. A choice is stored per browser under `wfm-color-theme`; 默认 stores nothing and follows `WEBFM_THEME`. Values saved by earlier versions under other keys are not read.
+  - Code preview uses the highlight.js GitHub stylesheet that matches the theme: `github-dark` for dark themes, `github` for light ones.
 - Performance constraints: no new font, icon, or UI-framework network dependency; inline SVG icons and existing local assets only.
 - Compatibility constraints: preserve Basic Auth, deep links, keyboard image navigation, media Range requests, PDF.js, MathJax, and all current file operations.
 - Markdown rendering: typeset common inline/display LaTeX delimiters with the vendored MathJax bundle after each rendered-view update; source mode remains literal and code blocks are excluded from typesetting.
 - Test/screenshot expectations:
-  - Functional checks for favorites navigation, directory loading, file selection, upload, theme migration, and preview actions.
+  - Functional checks for favorites navigation, directory loading, file selection, upload, the default theme and the saved theme choice, and preview actions.
   - Visual baselines at 1440×900, 1024×768, and 390×844.
   - README screenshots must be captured from an isolated temporary HOME with fictional files and audited for usernames, absolute paths, hostnames, and personal favorites before commit.
   - Keyboard/focus and reduced-motion checks before release.
@@ -202,6 +202,6 @@ Recommended desktop shell:
 
 - [x] Three-region desktop layout approved and implemented on 2026-08-03, then superseded by the unified two-region sidebar on 2026-08-31.
 - [x] Simplified Chinese adopted for primary interface labels on 2026-08-03.
-- [x] Dark/theme-gallery controls removed from the user interface; Cloud Light is canonical.
+- [x] Dark/theme-gallery controls removed from the user interface; Cloud Light is canonical. Superseded on 2026-10-21: Darcula is the default, and a compact theme menu in the sidebar footer offers all thirteen palettes.
 - [x] Locations/Favorites and the active directory were merged into one collapsible sidebar on 2026-08-31.
 - [x] The redundant Locations section was removed and Favorites became collapsed-by-default on 2026-08-31.

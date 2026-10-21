@@ -12,7 +12,8 @@ A lightweight single-user web file browser. The interface is rooted at the runni
 
 ## Features
 
-- Cloud Light theme: favorites and the file list are on the left, with the preview area on the right.
+- Favorites and the file list are on the left, with the preview area on the right.
+- Dark by default (Darcula). The 主题 (theme) menu at the bottom of the sidebar switches among 13 themes, six dark and seven light, including Cloud Light; each browser keeps its own choice, and 默认 (default) returns to the server's `WEBFM_THEME`. Code highlighting follows the theme.
 - The file sidebar width can be adjusted, and the entire sidebar can be collapsed using the button or the `B` key.
 - Favorites are collapsed by default; the star on a directory row adds or removes it from favorites.
 - The hidden-file toggle uses closed-eye and open-eye icons to indicate its current state.
@@ -44,6 +45,7 @@ By default, it listens on `0.0.0.0:7701`.
 | `WEBFM_CONFIG_DIR` | `~/.config/web-file-manager` | Configuration directory |
 | `WEBFM_FAVORITES_FILE` | `$WEBFM_CONFIG_DIR/favorites.json` | Favorites data file |
 | `WEBFM_EXTRA_ROOTS` | `/tmp` | Comma-separated directories outside `$HOME` that can be browsed read-only; empty turns this off |
+| `WEBFM_THEME` | `darcula` | Theme a browser shows until it picks one from the theme menu: `darcula`, `dracula`, `one-dark`, `nord`, `gruvbox-dark`, `catppuccin-mocha`, `cloud-light`, `github-light`, `one-light`, `solarized-light`, `gruvbox-light`, `catppuccin-latte` or `nord-light`. An unknown value falls back to `darcula` with a warning |
 
 ## systemd User Service
 

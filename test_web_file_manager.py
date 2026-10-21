@@ -1,4 +1,6 @@
 import base64
+import contextlib
+import io
 import json
 import re
 import tempfile
@@ -59,7 +61,7 @@ class FrontendContractTest(unittest.TestCase):
         missing = (jquery_style | native_style) - self.ids - dynamic_ids
         self.assertEqual(missing, set())
 
-    def test_cloud_light_unified_sidebar_shell_is_present(self):
+    def test_unified_sidebar_shell_is_present(self):
         required_ids = {
             "nav-rail",
             "favorites",
@@ -70,8 +72,6 @@ class FrontendContractTest(unittest.TestCase):
             "preview-download",
         }
         self.assertTrue(required_ids.issubset(self.ids))
-        self.assertIn('document.documentElement.dataset.theme = "cloud-light"', webfm.HTML)
-        self.assertNotIn('<select id="theme-select"', webfm.HTML)
         self.assertLess(webfm.HTML.index('id="pane-left"'), webfm.HTML.index('id="nav-rail"'))
         self.assertLess(webfm.HTML.index('id="nav-rail"'), webfm.HTML.index('id="pane-right"'))
         self.assertIn("grid-template-columns: 0 minmax(0, 1fr);", webfm.HTML)
@@ -146,6 +146,70 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("async function copyFullText(entry, button)", webfm.HTML)
         self.assertIn('fileUrlFor(entry, "text", "&full=1")', webfm.HTML)
         self.assertIn("navigator.clipboard.writeText(text)", webfm.HTML)
+
+
+class ThemeTest(unittest.TestCase):
+    """The default theme comes from WEBFM_THEME, the menu offers every theme the CSS
+    defines, and component rules take their colors from the theme."""
+
+    BLOCK = re.compile(r':root\[data-theme="([a-z0-9-]+)"\][^{]*\{([^}]*)\}')
+
+    def css_blocks(self):
+        return {theme_id: body for theme_id, body in self.BLOCK.findall(webfm.HTML)}
+
+    def test_menu_and_css_offer_the_same_themes(self):
+        listed = [theme_id for theme_id, _, _ in webfm.THEMES]
+        self.assertEqual(len(listed), len(set(listed)))
+        self.assertEqual(set(listed), set(self.css_blocks()))
+
+    def test_dark_flag_matches_the_css_color_scheme(self):
+        blocks = self.css_blocks()
+        for theme_id, _, dark in webfm.THEMES:
+            self.assertEqual("color-scheme: dark" in blocks[theme_id], dark, theme_id)
+
+    def test_default_is_dark_and_bad_values_fall_back(self):
+        self.assertEqual(webfm.FALLBACK_THEME, "darcula")
+        self.assertEqual(webfm._default_theme("nord-light"), "nord-light")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(webfm._default_theme("no-such-theme"), "darcula")
+        self.assertIn("WEBFM_THEME", err.getvalue())
+
+    def test_page_applies_a_saved_choice_or_the_default_before_its_css(self):
+        html = webfm.HTML
+        self.assertIn('id="theme-select"', html)
+        self.assertIn('id="hljs-theme"', html)
+        self.assertIn("github-dark.min.css", html)
+        self.assertLess(html.index("applyTheme(wfmSavedTheme);"), html.index("<style>"))
+
+    def test_component_rules_take_colors_from_the_theme(self):
+        # Cloud Light's former literals now live only in its own block.
+        css = webfm.HTML[webfm.HTML.index("<style>"):webfm.HTML.index("</style>")]
+        components = css[css.index("* { box-sizing: border-box; }"):]
+        for literal in ("#344054", "#98a2b3", "#b2b8c2", "#1849a9", "#d1e0ff",
+                        "#1570ef", "#eef2f6", "#fef3f2", "#f0f2f5", "rgba(255, 255, 255, 0.96)"):
+            self.assertNotIn(literal, components, literal)
+
+
+class ThemePageTest(AsyncHTTPTestCase):
+    def setUp(self):
+        self.old = (webfm.AUTH, webfm.DEFAULT_THEME)
+        webfm.AUTH = "tester:secret"
+        webfm.DEFAULT_THEME = "nord"
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        webfm.AUTH, webfm.DEFAULT_THEME = self.old
+
+    def get_app(self):
+        return tornado.web.Application([(r"/", webfm.IndexHandler)])
+
+    def test_page_carries_the_themes_and_the_default(self):
+        token = base64.b64encode(webfm.AUTH.encode()).decode()
+        html = self.fetch("/", headers={"Authorization": "Basic " + token}).body.decode()
+        self.assertNotIn("__WEBFM_THEME", html)
+        self.assertIn('const WFM_DEFAULT_THEME = "nord";', html)
+        self.assertIn('{"id": "darcula", "name": "Darcula", "dark": true}', html)
 
 
 class FileHandlerRangeTest(AsyncHTTPTestCase):

@@ -12,7 +12,8 @@
 
 ## 功能
 
-- Cloud Light 亮色界面：左侧为收藏夹和文件列表，右侧为预览区。
+- 左侧为收藏夹和文件列表，右侧为预览区。
+- 默认深色（Darcula）。侧栏底部的「主题」菜单可在 13 个主题之间切换（6 个深色、7 个浅色，含 Cloud Light）；每个浏览器各自记住选择，选「默认」则回到服务器的 `WEBFM_THEME`。代码高亮随主题切换。
 - 文件侧栏可调整宽度，也可通过按钮或 `B` 键整体收起。
 - 收藏夹默认折叠；目录行的星标用于添加或取消收藏。
 - 隐藏文件开关使用闭眼和睁眼图标表示当前状态。
@@ -44,6 +45,7 @@ WEBFM_AUTH="<user>:<strong-password>" python web_file_manager.py
 | `WEBFM_CONFIG_DIR` | `~/.config/web-file-manager` | 配置目录 |
 | `WEBFM_FAVORITES_FILE` | `$WEBFM_CONFIG_DIR/favorites.json` | 收藏夹数据文件 |
 | `WEBFM_EXTRA_ROOTS` | `/tmp` | 逗号分隔、可只读浏览的 `$HOME` 之外的目录；设为空即关闭 |
+| `WEBFM_THEME` | `darcula` | 浏览器在主题菜单里选择之前显示的主题：`darcula`、`dracula`、`one-dark`、`nord`、`gruvbox-dark`、`catppuccin-mocha`、`cloud-light`、`github-light`、`one-light`、`solarized-light`、`gruvbox-light`、`catppuccin-latte` 或 `nord-light`。无法识别的值回退到 `darcula` 并给出警告 |
 
 ## systemd 用户服务
 

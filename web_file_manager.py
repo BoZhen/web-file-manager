@@ -38,6 +38,40 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
 TEXT_PREVIEW_CAP = 512 * 1024  # 512 KB
 MATHJAX_DEFAULT_URL = "/mathjax/es5/tex-mml-chtml.js"
 
+# Color themes: (data-theme value, name in the theme menu, dark). Each has a
+# :root[data-theme="…"] block in the page's CSS; a test keeps the two in step.
+THEMES = (
+    ("darcula", "Darcula", True),
+    ("dracula", "Dracula", True),
+    ("one-dark", "One Dark", True),
+    ("nord", "Nord", True),
+    ("gruvbox-dark", "Gruvbox Dark", True),
+    ("catppuccin-mocha", "Catppuccin Mocha", True),
+    ("cloud-light", "Cloud Light", False),
+    ("github-light", "GitHub Light", False),
+    ("one-light", "One Light", False),
+    ("solarized-light", "Solarized Light", False),
+    ("gruvbox-light", "Gruvbox Light", False),
+    ("catppuccin-latte", "Catppuccin Latte", False),
+    ("nord-light", "Nord Light", False),
+)
+FALLBACK_THEME = "darcula"
+
+
+def _default_theme(name: str) -> str:
+    """WEBFM_THEME if it names a theme, else Darcula (with a warning)."""
+    ids = [theme_id for theme_id, _, _ in THEMES]
+    if name in ids:
+        return name
+    print(f"WARNING: WEBFM_THEME={name!r} is not a theme; using {FALLBACK_THEME}. "
+          f"Themes: {', '.join(ids)}", file=sys.stderr)
+    return FALLBACK_THEME
+
+
+# The theme a browser shows until it picks one from the menu, which it then keeps.
+DEFAULT_THEME = _default_theme(os.environ.get("WEBFM_THEME", FALLBACK_THEME).strip())
+THEMES_JSON = json.dumps([{"id": i, "name": n, "dark": d} for i, n, d in THEMES])
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif", ".heic"}
 VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".ogv", ".mov", ".mkv"}
 PDF_EXTS = {".pdf"}
@@ -286,7 +320,9 @@ class IndexHandler(BasicAuthMixin, tornado.web.RequestHandler):
         self.set_header("Cache-Control", "no-store")
         roots = [{"seg": seg, "path": str(root)} for seg, root in _mounts().items()]
         self.write(HTML.replace("__WEBFM_HOME_JSON__", json.dumps(str(HOME)))
-                       .replace("__WEBFM_ROOTS_JSON__", json.dumps(roots)))
+                       .replace("__WEBFM_ROOTS_JSON__", json.dumps(roots))
+                       .replace("__WEBFM_THEMES_JSON__", THEMES_JSON)
+                       .replace("__WEBFM_THEME_JSON__", json.dumps(DEFAULT_THEME)))
 
 
 class ListHandler(BasicAuthMixin, tornado.web.RequestHandler):
@@ -677,14 +713,31 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" id="theme-color-meta" content="#f5f7fa">
+<meta name="theme-color" id="theme-color-meta" content="#2b2b2b">
 <title>File Manager</title>
-<link rel="stylesheet"
+<link rel="stylesheet" id="hljs-theme"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 <script>
-document.documentElement.dataset.theme = "cloud-light";
+/* Color theme, applied before the first paint: the one this browser picked from
+   the theme menu, else the server's default (WEBFM_THEME). A dark theme also takes
+   highlight.js's dark stylesheet; the light one draws code text too dark for it. */
+const WFM_THEMES = __WEBFM_THEMES_JSON__;
+const WFM_DEFAULT_THEME = __WEBFM_THEME_JSON__;
+const WFM_THEME_KEY = "wfm-color-theme";
+function applyTheme(id) {
+  const theme = WFM_THEMES.find(t => t.id === id)
+    || WFM_THEMES.find(t => t.id === WFM_DEFAULT_THEME);
+  document.documentElement.dataset.theme = theme.id;
+  const hl = document.getElementById("hljs-theme");
+  const sheet = theme.dark ? "github-dark.min.css" : "github.min.css";
+  if (!hl.href.endsWith("/" + sheet)) hl.href = hl.href.replace(/[^/]+$/, sheet);
+  return theme;
+}
+let wfmSavedTheme = null;
+try { wfmSavedTheme = localStorage.getItem(WFM_THEME_KEY); } catch (e) {}
+applyTheme(wfmSavedTheme);
 </script>
 <style>
   :root, :root[data-theme="dracula"] {
@@ -905,6 +958,7 @@ document.documentElement.dataset.theme = "cloud-light";
     --preview-info-button-bg: rgba(255,255,255,0.22);
     --preview-info-button-border: rgba(255,255,255,0.34);
     --warning: #b45309;
+    --item-faint: var(--muted);
   }
   :root[data-theme="one-light"] {
     --theme-color: #fafafa;
@@ -1137,6 +1191,34 @@ document.documentElement.dataset.theme = "cloud-light";
     --preview-info-button-bg: #ffffff;
     --preview-info-button-border: #d0d5dd;
     --warning: #dc6803;
+    --item-text: #344054;
+    --item-faint: #98a2b3;
+    --item-sep: #b2b8c2;
+    --item-line: #f0f2f5;
+    --item-selected-text: #1849a9;
+    --item-selected-border: #d1e0ff;
+    --doc-icon: #1570ef;
+    --badge-bg: #eef2f6;
+    --danger-bg: #fef3f2;
+    --header-bg: rgba(255, 255, 255, 0.96);
+  }
+  /* Tokens for the file list, path and navigation. Every theme derives them from
+     its own palette; Cloud Light, which they were drawn for, sets exact values in
+     its block above. */
+  :root {
+    --item-text: var(--text);
+    /* Sizes, dates and section headings carry information. The dark palettes' --muted
+       is a comment color, too dim for that, so dark themes take a tone halfway
+       towards --text; the light themes' shared rule keeps their own --muted. */
+    --item-faint: color-mix(in srgb, var(--muted) 50%, var(--text));
+    --item-sep: var(--muted);
+    --item-line: var(--border);
+    --item-selected-text: var(--text);
+    --item-selected-border: color-mix(in srgb, var(--accent) 45%, transparent);
+    --doc-icon: var(--accent);
+    --badge-bg: var(--hover);
+    --danger-bg: color-mix(in srgb, var(--danger) 14%, transparent);
+    --header-bg: var(--panel);
   }
   * { box-sizing: border-box; }
   html, body {
@@ -1277,38 +1359,22 @@ document.documentElement.dataset.theme = "cloud-light";
     padding: 6px 10px; cursor: pointer; font-size: 13px;
   }
   .toolbar label.btn:hover { background: var(--hover); }
+  /* The theme menu sits in a settings row like 隐藏文件, where that row shows its status. */
   .theme-select {
-    flex: 1;
     min-width: 0;
-    width: auto;
+    max-width: 160px;
     background: var(--panel);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 6px 8px;
-    font-size: 13px;
+    padding: 4px 6px;
+    font: inherit;
+    font-size: 12px;
     cursor: pointer;
   }
   .theme-select:focus {
     outline: none;
     border-color: var(--accent);
-  }
-  .theme-footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-    border-top: 1px solid var(--border);
-    padding: 8px 10px;
-    background: var(--panel-2);
-  }
-  .theme-footer-label {
-    flex-shrink: 0;
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0;
   }
 
   .listing {
@@ -1708,7 +1774,7 @@ document.documentElement.dataset.theme = "cloud-light";
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--panel);
-    color: #344054;
+    color: var(--item-text);
     font-weight: 600;
   }
   .text-button:hover { background: var(--hover); }
@@ -1812,7 +1878,7 @@ document.documentElement.dataset.theme = "cloud-light";
     align-items: center;
     gap: 8px;
     padding: 0 8px;
-    color: #98a2b3;
+    color: var(--item-faint);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -1823,7 +1889,7 @@ document.documentElement.dataset.theme = "cloud-light";
     min-width: 20px;
     padding: 1px 6px;
     border-radius: 999px;
-    background: #eef2f6;
+    background: var(--badge-bg);
     color: var(--muted);
     text-align: center;
     font-size: 10px;
@@ -1858,14 +1924,14 @@ document.documentElement.dataset.theme = "cloud-light";
     border: 0;
     border-radius: 8px;
     background: transparent;
-    color: #344054;
+    color: var(--item-text);
     cursor: pointer;
     text-align: left;
   }
   .nav-item:hover, .favorite-row:hover { background: var(--hover); text-decoration: none; }
   .nav-item.current, .favorite-row.current {
     background: var(--selected);
-    color: #1849a9;
+    color: var(--item-selected-text);
   }
   .nav-item .label, .favorite-row .name {
     min-width: 0;
@@ -1898,15 +1964,15 @@ document.documentElement.dataset.theme = "cloud-light";
     border: 0;
     border-radius: 7px;
     background: transparent;
-    color: #98a2b3;
+    color: var(--item-faint);
     opacity: 0;
   }
   .favorite-row:hover .favorite-toggle,
   .favorite-row:focus-within .favorite-toggle { opacity: 1; }
-  .favorite-row .favorite-toggle:hover { color: var(--danger); background: #fef3f2; }
+  .favorite-row .favorite-toggle:hover { color: var(--danger); background: var(--danger-bg); }
   .favorite-empty {
     padding: 8px 9px;
-    color: #98a2b3;
+    color: var(--item-faint);
     font-size: 12px;
     line-height: 1.45;
   }
@@ -1929,7 +1995,7 @@ document.documentElement.dataset.theme = "cloud-light";
     min-height: 68px;
     flex: 0 0 auto;
     border-bottom: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.96);
+    background: var(--header-bg);
   }
   .directory-header {
     display: flex;
@@ -1961,10 +2027,10 @@ document.documentElement.dataset.theme = "cloud-light";
     text-overflow: ellipsis;
     white-space: nowrap;
     border-radius: 6px;
-    color: #344054;
+    color: var(--item-text);
   }
   .crumbs .current { color: var(--text); font-weight: 650; }
-  .crumbs span.sep { padding: 0; color: #b2b8c2; }
+  .crumbs span.sep { padding: 0; color: var(--item-sep); }
   .crumbs .edit-path {
     width: 28px;
     height: 28px;
@@ -2022,7 +2088,7 @@ document.documentElement.dataset.theme = "cloud-light";
     align-items: center;
     gap: 8px;
     padding: 0 14px;
-    border-bottom: 1px solid #f0f2f5;
+    border-bottom: 1px solid var(--item-line);
     background: var(--panel);
     color: var(--muted);
     font-size: 12px;
@@ -2052,8 +2118,8 @@ document.documentElement.dataset.theme = "cloud-light";
   }
   .row:hover { background: var(--hover); }
   .row.selected {
-    border-color: #d1e0ff;
-    border-left-color: #d1e0ff;
+    border-color: var(--item-selected-border);
+    border-left-color: var(--item-selected-border);
     background: var(--selected);
   }
   .row .icon {
@@ -2061,25 +2127,25 @@ document.documentElement.dataset.theme = "cloud-light";
     height: 22px;
     display: grid;
     place-items: center;
-    color: #667085;
+    color: var(--muted);
     font-size: 0;
   }
   .row.dir .icon { color: #f79009; }
   .row.image .icon { color: #7f56d9; }
   .row.video .icon { color: #d92d20; }
   .row.pdf .icon { color: #d92d20; }
-  .row.markdown .icon, .row.text .icon { color: #1570ef; }
+  .row.markdown .icon, .row.text .icon { color: var(--doc-icon); }
   .row .icon .ui-icon { width: 19px; height: 19px; }
   .row .name {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #344054;
+    color: var(--item-text);
     font-weight: 520;
   }
-  .row.selected .name { color: #1849a9; font-weight: 650; }
-  .row .meta { color: #98a2b3; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .row.selected .name { color: var(--item-selected-text); font-weight: 650; }
+  .row .meta { color: var(--item-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
   .row .favorite-toggle {
     width: 28px;
     height: 28px;
@@ -2090,7 +2156,7 @@ document.documentElement.dataset.theme = "cloud-light";
     border: 0;
     border-radius: 7px;
     background: transparent;
-    color: #98a2b3;
+    color: var(--item-faint);
     opacity: 0;
   }
   .row:hover .favorite-toggle, .row:focus-within .favorite-toggle,
@@ -2108,7 +2174,7 @@ document.documentElement.dataset.theme = "cloud-light";
     background: var(--panel-2);
   }
   .uploads:empty { display: none; }
-  .upload-item { padding: 9px 0; color: #344054; }
+  .upload-item { padding: 9px 0; color: var(--item-text); }
   .upload-item .bar { height: 3px; margin-top: 6px; }
 
   .preview-header {
@@ -2162,10 +2228,10 @@ document.documentElement.dataset.theme = "cloud-light";
     border: 1px solid var(--border);
     border-radius: 14px;
     background: var(--panel);
-    color: #98a2b3;
+    color: var(--item-faint);
     box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
   }
-  .empty-state h2 { margin: 0; color: #344054; font-size: 15px; font-weight: 650; }
+  .empty-state h2 { margin: 0; color: var(--item-text); font-size: 15px; font-weight: 650; }
   .empty-state p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
   .preview-info { display: none; }
   .preview pre { padding: 18px 20px; background: var(--code-bg); color: var(--code-text); }
@@ -2289,6 +2355,7 @@ document.documentElement.dataset.theme = "cloud-light";
     <path d="m5.5 13.2-2 2M9 15l-1 3M15 15l1 3M18.5 13.2l2 2"/>
   </symbol>
   <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></symbol>
+  <symbol id="icon-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/></symbol>
   <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v13M7 11l5 5 5-5M5 21h14"/></symbol>
   <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
   <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
@@ -2332,6 +2399,11 @@ document.documentElement.dataset.theme = "cloud-light";
         <span class="label">隐藏文件</span>
         <span class="nav-status" id="hidden-status">隐藏</span>
       </button>
+      <label class="nav-item theme-row" for="theme-select">
+        <svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg>
+        <span class="label">主题</span>
+        <select class="theme-select" id="theme-select" aria-label="颜色主题"></select>
+      </label>
     </div>
   </aside>
     <header class="directory-header">
@@ -3684,6 +3756,53 @@ $("btn-hidden").onclick = () => {
 };
 syncHiddenBtn();
 
+/* Theme menu. 默认 follows the server's WEBFM_THEME and stores nothing; any other
+   choice is kept in this browser, and other open tabs switch with it. */
+function syncThemeColor() {
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--theme-color").trim();
+  if (color) $("theme-color-meta").setAttribute("content", color);
+}
+function syncThemeMenu(saved) {
+  $("theme-select").value = WFM_THEMES.some(t => t.id === saved) ? saved : "";
+}
+function buildThemeMenu() {
+  const select = $("theme-select");
+  const fallback = WFM_THEMES.find(t => t.id === WFM_DEFAULT_THEME);
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = `默认（${fallback.name}）`;
+  select.appendChild(auto);
+  for (const [label, dark] of [["深色", true], ["浅色", false]]) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const theme of WFM_THEMES.filter(t => t.dark === dark)) {
+      const option = document.createElement("option");
+      option.value = theme.id;
+      option.textContent = theme.name;
+      group.appendChild(option);
+    }
+    select.appendChild(group);
+  }
+  syncThemeMenu(wfmSavedTheme);
+}
+$("theme-select").onchange = () => {
+  const id = $("theme-select").value;
+  try {
+    if (id) localStorage.setItem(WFM_THEME_KEY, id);
+    else localStorage.removeItem(WFM_THEME_KEY);
+  } catch (e) {}
+  applyTheme(id || null);
+  syncThemeColor();
+};
+window.addEventListener("storage", e => {
+  if (e.key !== WFM_THEME_KEY) return;
+  applyTheme(e.newValue);
+  syncThemeMenu(e.newValue);
+  syncThemeColor();
+});
+buildThemeMenu();
+syncThemeColor();
+
 function syncSortBtn() {
   $("sort-label").textContent = SORT_LABEL[state.sortBy] || SORT_LABEL.name;
 }
@@ -3836,6 +3955,7 @@ def main():
         print(f"Web file manager running at http://{address}:{PORT}")
     print(f"Root: {HOME}")
     print(f"Auth: enabled (user={AUTH.split(':', 1)[0]})")
+    print(f"Theme: {DEFAULT_THEME} until a browser picks another")
     tornado.ioloop.IOLoop.current().start()
 
 
