@@ -83,6 +83,16 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn('.app.preview-open #pane-right { display: flex; }', webfm.HTML)
         self.assertIn('id="btn-back-list"', webfm.HTML)
 
+    def test_preview_subtitle_uses_absolute_path_and_clears_stale_tooltip(self):
+        render = webfm.HTML.split("function renderPreview(entry) {", 1)[1].split("const copy =", 1)[0]
+        self.assertIn("pathForEditing(fullPath(entry.name))", render)
+        self.assertIn("metaEl.textContent = metaPath;", render)
+        self.assertIn("metaEl.title = metaPath;", render)
+        self.assertNotIn("fmtSize(", render)
+        self.assertNotIn("fmtTime(", render)
+        reset = webfm.HTML.split("function resetPreview() {", 1)[1].split("function clearPreviewBody", 1)[0]
+        self.assertIn('$("preview-meta").title = "";', reset)
+
     def test_favorites_are_the_only_collapsible_shortcut_section(self):
         self.assertNotIn('id="locations-heading"', webfm.HTML)
         self.assertNotIn('id="nav-home"', webfm.HTML)

@@ -3182,6 +3182,7 @@ function resetPreview() {
   pv.innerHTML = emptyPreviewMarkup();
   $("preview-title").textContent = "预览";
   $("preview-meta").textContent = "选择一个文件，在这里查看内容";
+  $("preview-meta").title = "";
   $("preview-toggle").hidden = true;
   $("preview-toggle").onclick = null;
   const copy = $("preview-copy");
@@ -3208,7 +3209,12 @@ function renderPreview(entry) {
   clearPreviewBody(pv);
 
   $("preview-title").textContent = entry.name;
-  $("preview-meta").textContent = `${KIND_LABEL[entry.kind] || "文件"} · ${fmtSize(entry.size)} · ${fmtTime(entry.mtime)}`;
+  // Show the file's path under the name, not its type/size/date. The line
+  // truncates with an ellipsis, so keep the whole path in the tooltip.
+  const metaPath = pathForEditing(fullPath(entry.name));
+  const metaEl = $("preview-meta");
+  metaEl.textContent = metaPath;
+  metaEl.title = metaPath;
   const copy = $("preview-copy");
   resetCopyButton(copy);
   copy.hidden = !COPYABLE_KINDS.has(entry.kind);
