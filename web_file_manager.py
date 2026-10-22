@@ -1565,6 +1565,11 @@ applyTheme(wfmSavedTheme);
     text-align: left;
   }
   .preview pre code { background: transparent !important; padding: 0; display: block; }
+  /* Text files: the preview stacks its children (it is a centring row for images),
+     so a truncation notice sits above the code, which scrolls on its own. */
+  .preview.text-mode { flex-direction: column; align-items: stretch; justify-content: flex-start; overflow: hidden; }
+  .preview.text-mode pre { flex: 1; min-height: 0; height: auto; }
+  .preview.text-mode .text-banner { position: static; flex: none; }
 
   /* Markdown rendered view */
   .preview.md-mode {
@@ -3556,6 +3561,7 @@ function loadText(entry, force) {
         document.getElementById("force-text-btn").onclick = () => loadText(entry, true);
         return;
       }
+      pv.classList.add("text-mode");
       const pre = document.createElement("pre");
       const code = document.createElement("code");
       if (data.lang) code.className = "language-" + data.lang;
