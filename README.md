@@ -81,3 +81,8 @@ systemctl --user enable --now webfilemanager.service
 - The extra directories are read-only: uploads into them return 403. Each appears as its own breadcrumb root, so `/tmp` and `~/tmp` stay distinct, and a `/?open=/tmp/...` link opens the file in `/tmp`.
 - HTML previews treat files as trusted personal documents and do not use an iframe sandbox.
 - The service is suitable for a trusted LAN or private overlay networks such as Nebula and Tailscale, and should not be exposed directly to the public internet.
+
+## License
+
+[MIT](LICENSE) © 2026 BoZhen. PDF.js (`pdfjs/`) and MathJax (`mathjax/`) are
+vendored under the Apache License 2.0; their license files are in those folders.

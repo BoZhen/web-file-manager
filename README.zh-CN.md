@@ -81,3 +81,7 @@ systemctl --user enable --now webfilemanager.service
 - 额外目录是只读的：向其中上传返回 403。每个额外目录在路径栏里是独立的根，所以 `/tmp` 与 `~/tmp` 互不混淆，`/?open=/tmp/...` 链接打开的是 `/tmp` 里的文件。
 - HTML 预览按可信个人文档处理，不使用 iframe sandbox。
 - 服务适合在可信 LAN 或 Nebula、Tailscale 等私有组网中使用，不应直接暴露在公网。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 BoZhen。内置的 PDF.js（`pdfjs/`）和 MathJax（`mathjax/`）使用 Apache License 2.0，许可证文件在各自目录中。
