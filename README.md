@@ -24,6 +24,7 @@ A lightweight single-user web file browser. The interface is rooted at the runni
 - Markdown supports syntax highlighting and `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` LaTeX formulas.
 - HTML files support webpage preview and source switching; text and code files support syntax highlighting.
 - Markdown, HTML, text, and code previews provide a Copy action that copies the complete source, including content beyond the preview limit.
+- The file being previewed reloads by itself when it changes on disk: an image, a PDF, a video, Markdown, HTML, text or code. The reload keeps your place (the PDF page and zoom, the scroll position, the video's time, Markdown's rendered or source view), and a short "已更新" note says it happened. A file still being written is shown once it has held still for a moment; a deleted file stays on screen marked "文件已删除" and reloads if it comes back. The check runs only while the page is visible.
 - Drag-and-drop uploads, multiple-file uploads, and file downloads are supported.
 - On narrow screens, the file list and preview area are shown separately, and the preview page provides a button to return to the list.
 

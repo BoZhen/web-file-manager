@@ -540,6 +540,33 @@ class FileHandler(BasicAuthMixin, tornado.web.RequestHandler):
         })
 
 
+class StatHandler(BasicAuthMixin, tornado.web.RequestHandler):
+    """A file's revision, polled by the page while it shows the file, so the
+    preview reloads when the file changes on disk. `mtime` is in the listing's
+    units; `rev` also tells apart two writes within the same second."""
+
+    def get(self):
+        if not self._check_auth():
+            return
+        try:
+            target = _safe_resolve(self.get_argument("path", ""))
+        except ValueError:
+            self.set_status(403)
+            self.write({"error": "path escapes root"})
+            return
+        self.set_header("Cache-Control", "no-store")
+        try:
+            st = target.stat()
+        except OSError:
+            st = None
+        if st is None or not target.is_file():
+            self.set_status(404)
+            self.write({"error": "not a file"})
+            return
+        self.write({"mtime": int(st.st_mtime), "size": st.st_size,
+                    "rev": f"{st.st_mtime_ns}-{st.st_size}"})
+
+
 class PreviewHandler(BasicAuthMixin, tornado.web.RequestHandler):
     """Serve HOME files at path-shaped URLs so HTML notes can load relative assets."""
 
@@ -2190,6 +2217,14 @@ applyTheme(wfmSavedTheme);
     padding: 9px 14px;
   }
   .preview-heading { flex: 1; min-width: 0; }
+  .preview-live {
+    flex: none; font-size: 12px; line-height: 1; padding: 4px 8px; border-radius: 999px;
+    color: var(--success); border: 1px solid currentColor; white-space: nowrap;
+    transition: opacity .4s;
+  }
+  .preview-live[hidden] { display: none; }
+  .preview-live.fade { opacity: 0; }
+  .preview-live.gone { color: var(--danger); }
   .preview-title {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2459,6 +2494,7 @@ applyTheme(wfmSavedTheme);
         <div class="preview-title" id="preview-title">预览</div>
         <div class="preview-meta" id="preview-meta">选择一个文件，在这里查看内容</div>
       </div>
+      <span class="preview-live" id="preview-live" role="status" hidden></span>
       <button class="text-button" id="preview-toggle" type="button" hidden>
         <svg class="ui-icon"><use href="#icon-code"></use></svg>
         <span class="button-label">源码</span>
@@ -3035,6 +3071,7 @@ async function load(path, opts) {
     renderFavorites();
     renderListing();
     if (!refreshedEntry) resetPreview();
+    else if (!keepPreviewDom && previousEntry && previousEntry.kind === refreshedEntry.kind) refreshPreview(refreshedEntry);
     else if (!keepPreviewDom) renderPreview(refreshedEntry);
     return true;
   } catch (e) {
@@ -3055,7 +3092,7 @@ function fullPath(name) {
 // Cache-bust by mtime so editing a file with the same name re-fetches it
 // instead of serving from the 1-hour browser cache. The backend ignores `v`.
 function fileUrlFor(entry, mode, extra) {
-  const v = entry.mtime || 0;
+  const v = entry.rev || entry.mtime || 0;
   let u = "/api/file?mode=" + mode
         + "&path=" + encodeURIComponent(fullPath(entry.name))
         + "&v=" + v;
@@ -3068,7 +3105,7 @@ function previewUrlFor(entry) {
     .split("/")
     .map(seg => encodeURIComponent(seg))
     .join("/");
-  return "/preview" + encodedPath + "?v=" + (entry.mtime || 0) + "&viewer=html-note-v2";
+  return "/preview" + encodedPath + "?v=" + (entry.rev || entry.mtime || 0) + "&viewer=html-note-v2";
 }
 
 function selectFile(name) {
@@ -3196,6 +3233,7 @@ function resetPreview() {
   $("preview-download").hidden = true;
   $("preview-download").onclick = null;
   $("app").classList.remove("preview-open");
+  watchPreview(null);
 }
 
 function clearPreviewBody(pv) {
@@ -3233,6 +3271,7 @@ function renderPreview(entry) {
   setPreviewToggleLabel(previewToggle, "源码");
 
   const fileUrl = fileUrlFor(entry, "raw");
+  watchPreview(entry);
 
   if (entry.kind === "image") {
     const img = document.createElement("img");
@@ -3420,7 +3459,7 @@ function typesetMarkdownMath(container) {
     .catch(error => console.error("Markdown MathJax:", error));
 }
 
-function loadMarkdown(entry, toggle) {
+function loadMarkdown(entry, toggle, startMode) {
   const pv = $("preview");
   clearPreviewBody(pv);
   pv.classList.add("md-mode");
@@ -3432,7 +3471,7 @@ function loadMarkdown(entry, toggle) {
   })();
 
   const url = fileUrlFor(entry, "text");
-  fetch(url, { credentials: "same-origin" })
+  return fetch(url, { credentials: "same-origin" })
     .then(r => {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
@@ -3486,8 +3525,9 @@ function loadMarkdown(entry, toggle) {
       body.className = "md-body";
       wrap.appendChild(body);
 
-      let mode = "rendered";
+      let mode = startMode || "rendered";
       const renderBody = () => {
+        wrap.dataset.mode = mode;      // a reload of the file keeps the view
         clearMarkdownMath(body);
         if (mode === "rendered") {
           const protectedMath = protectMarkdownMath(source);
@@ -3543,7 +3583,8 @@ function loadText(entry, force) {
   clearPreviewBody(pv);
 
   const url = fileUrlFor(entry, "text", force ? "&force=1" : "");
-  fetch(url, { credentials: "same-origin" })
+  watch.force = Boolean(force);
+  return fetch(url, { credentials: "same-origin" })
     .then(r => {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
@@ -3921,6 +3962,151 @@ listing.addEventListener("drop", (e) => {
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => e.preventDefault());
 
+// --- Live preview: the file shown reloads when it changes on disk ---
+// While a file is shown, its revision is asked for every WATCH_MS (only while the
+// page is visible, one request at a time). A change is acted on once the file has
+// held still for one more interval, so a file still being written is not shown
+// half done. The reload keeps the reader's place: the PDF page and zoom, the scroll
+// position of text, Markdown and HTML, a video's time.
+const WATCH_MS = 1500;
+const watch = { path: null, base: null, rev: null, pending: null, busy: false, gone: false, force: false };
+let liveTimer = 0;
+
+function setLive(kind) {
+  const el = $("preview-live");
+  if (liveTimer) { window.clearTimeout(liveTimer); liveTimer = 0; }
+  el.classList.remove("fade", "gone");
+  if (!kind) { el.hidden = true; return; }
+  el.hidden = false;
+  if (kind === "gone") {
+    el.textContent = "文件已删除";
+    el.title = "这个文件已不在磁盘上；它回来时会自动重新加载";
+    el.classList.add("gone");
+    return;
+  }
+  el.textContent = "已更新";
+  el.title = "文件在磁盘上改动了，已自动加载新版本";
+  liveTimer = window.setTimeout(() => {
+    el.classList.add("fade");
+    liveTimer = window.setTimeout(() => { el.hidden = true; liveTimer = 0; }, 450);
+  }, 1800);
+}
+
+function watchPreview(entry) {
+  watch.path = entry ? fullPath(entry.name) : null;
+  watch.base = entry ? { mtime: entry.mtime, size: entry.size } : null;
+  watch.rev = entry && entry.rev ? entry.rev : null;
+  watch.pending = null;
+  watch.gone = false;
+  watch.force = false;
+  setLive(null);
+}
+
+async function pollPreview() {
+  if (!watch.path || watch.busy || document.visibilityState !== "visible") return;
+  const path = watch.path;
+  watch.busy = true;
+  try {
+    const r = await fetch("/api/stat?path=" + encodeURIComponent(path),
+                          { credentials: "same-origin", cache: "no-store" });
+    if (path !== watch.path) return;
+    if (r.status === 404) {
+      if (!watch.gone) { watch.gone = true; setLive("gone"); }
+      return;
+    }
+    if (!r.ok) return;
+    const d = await r.json();
+    if (path !== watch.path) return;
+    const wasGone = watch.gone;
+    if (wasGone) { watch.gone = false; setLive(null); }
+    if (watch.rev === null && !wasGone && watch.base
+        && d.mtime === watch.base.mtime && d.size === watch.base.size) {
+      watch.rev = d.rev;            // what is shown is current
+      return;
+    }
+    if (d.rev === watch.rev) { watch.pending = null; return; }
+    if (watch.pending !== d.rev) { watch.pending = d.rev; return; }   // still being written?
+    watch.rev = d.rev;
+    watch.pending = null;
+    const entry = entryByName(state.selected);
+    if (!entry || fullPath(entry.name) !== path) return;
+    entry.mtime = d.mtime;
+    entry.size = d.size;
+    entry.rev = d.rev;
+    refreshPreview(entry);
+    setLive("updated");
+  } catch (e) {
+    // offline or a restart of the server: try again on the next tick
+  } finally {
+    watch.busy = false;
+  }
+}
+window.setInterval(pollPreview, WATCH_MS);
+
+// Show the new version of the file in place, keeping the reader's place.
+function refreshPreview(entry) {
+  const pv = $("preview");
+  // Text and Markdown scroll inside their own box (the code's <pre>, .md-render),
+  // which the loaders build anew; its position goes onto the new box as soon as
+  // the new text is in, before the page paints.
+  const scroller = () => pv.querySelector(".md-render") || pv.querySelector("pre") || pv;
+  const keepScroll = (load) => {
+    const box = scroller(), top = box.scrollTop, left = box.scrollLeft;
+    Promise.resolve(load()).then(() => {
+      const next = scroller();
+      next.scrollTop = top;
+      next.scrollLeft = left;
+    }, () => {});
+  };
+  watch.path = fullPath(entry.name);
+  watch.rev = entry.rev || null;
+  watch.base = { mtime: entry.mtime, size: entry.size };
+  if (entry.kind === "image") {
+    const img = pv.querySelector("img");
+    if (!img) return renderPreview(entry);
+    const next = new Image();
+    next.onload = () => { if (state.selected === entry.name) img.src = next.src; };
+    next.src = fileUrlFor(entry, "raw");
+  } else if (entry.kind === "video") {
+    const video = pv.querySelector("video");
+    if (!video) return renderPreview(entry);
+    const t = video.currentTime, playing = !video.paused;
+    video.src = fileUrlFor(entry, "raw");
+    video.addEventListener("loadedmetadata", () => {
+      try { video.currentTime = Math.min(t, video.duration || t); } catch (e) {}
+      if (playing) video.play().catch(() => {});
+    }, { once: true });
+  } else if (entry.kind === "pdf") {
+    const frame = pv.querySelector("iframe.pdf-viewer");
+    if (!frame) return renderPreview(entry);
+    let place = "";
+    try {
+      const app = frame.contentWindow.PDFViewerApplication;
+      const loc = app && app.pdfViewer && app.pdfViewer._location;
+      if (loc && loc.pdfOpenParams) place = "&" + loc.pdfOpenParams.replace(/^#/, "");
+      else if (app && app.page) place = "&page=" + app.page;
+    } catch (e) {}
+    frame.src = "/pdfjs/web/viewer.html?file=" + encodeURIComponent(fileUrlFor(entry, "raw"))
+              + "#pagemode=none" + place;
+  } else if (entry.kind === "html" && pv.classList.contains("html-mode")) {
+    const frame = pv.querySelector("iframe.html-viewer");
+    if (!frame) return renderPreview(entry);
+    let x = 0, y = 0;
+    try { x = frame.contentWindow.scrollX; y = frame.contentWindow.scrollY; } catch (e) {}
+    frame.addEventListener("load", () => {
+      try { frame.contentWindow.scrollTo(x, y); } catch (e) {}
+    }, { once: true });
+    frame.src = previewUrlFor(entry);
+  } else if (entry.kind === "markdown" && pv.classList.contains("md-mode")) {
+    const md = pv.querySelector(".md-render");
+    const mode = md && md.dataset.mode;
+    keepScroll(() => loadMarkdown(entry, $("preview-toggle"), mode));
+  } else if (entry.kind === "markdown" || entry.kind === "html" || entry.kind === "text") {
+    const force = watch.force;
+    keepScroll(() => loadText(entry, force));
+  }
+}
+
 // --- Auto-refresh listing when returning to the tab ---
 let _hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
@@ -3953,6 +4139,7 @@ def main():
         (r"/api/list", ListHandler),
         (r"/api/favorites", FavoritesHandler),
         (r"/api/file", FileHandler),
+        (r"/api/stat", StatHandler),
         (r"/api/upload", UploadHandler),
         (r"/preview/(.*)", PreviewHandler),
         (r"/pdfjs/(.*)", AuthStaticHandler, {"path": str(PDFJS_DIR)}),

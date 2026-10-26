@@ -2,6 +2,7 @@ import base64
 import contextlib
 import io
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -134,6 +135,18 @@ class FrontendContractTest(unittest.TestCase):
             "else if (!keepPreviewDom) renderPreview(refreshedEntry);",
             webfm.HTML,
         )
+        # the shown file changed (same name and kind): reloaded in place
+        self.assertIn("refreshPreview(refreshedEntry);", webfm.HTML)
+
+    def test_the_shown_file_is_watched_and_reloaded_in_place(self):
+        self.assertIn('fetch("/api/stat?path="', webfm.HTML)
+        self.assertIn("window.setInterval(pollPreview, WATCH_MS);", webfm.HTML)
+        self.assertIn('document.visibilityState !== "visible"', webfm.HTML)
+        self.assertIn("watchPreview(entry);", webfm.HTML)
+        self.assertIn("watchPreview(null);", webfm.HTML)
+        # cache-busting by the exact revision once it is known
+        self.assertIn("const v = entry.rev || entry.mtime || 0;", webfm.HTML)
+        self.assertIn('id="preview-live"', webfm.HTML)
 
     def test_markdown_preview_typesets_latex_with_local_mathjax(self):
         self.assertIn("function protectMarkdownMath(source)", webfm.HTML)
@@ -322,6 +335,57 @@ class FileHandlerRangeTest(AsyncHTTPTestCase):
         self.assertEqual(preview_data["content"], "abcdefgh")
         self.assertFalse(full_data["truncated"])
         self.assertEqual(full_data["content"], "abcdefghijklmno")
+
+
+class StatHandlerTest(AsyncHTTPTestCase):
+    """GET /api/stat: what the page polls to reload a preview when its file changes."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.old_home, self.old_auth = webfm.HOME, webfm.AUTH
+        webfm.HOME = Path(self.temp_dir.name).resolve()
+        webfm.AUTH = "tester:secret"
+        (webfm.HOME / "plot.png").write_bytes(b"one")
+        (webfm.HOME / "sub").mkdir()
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        webfm.HOME, webfm.AUTH = self.old_home, self.old_auth
+        self.temp_dir.cleanup()
+
+    def get_app(self):
+        return tornado.web.Application([(r"/api/stat", webfm.StatHandler)])
+
+    def stat(self, path, auth=True):
+        headers = {"Authorization": "Basic " + base64.b64encode(webfm.AUTH.encode()).decode()} if auth else {}
+        return self.fetch("/api/stat?path=" + path, headers=headers)
+
+    def test_a_file_reports_its_revision_uncached(self):
+        r = self.stat("/plot.png")
+        self.assertEqual(r.code, 200)
+        self.assertEqual(r.headers.get("Cache-Control"), "no-store")
+        d = json.loads(r.body)
+        st = (webfm.HOME / "plot.png").stat()
+        self.assertEqual(d, {"mtime": int(st.st_mtime), "size": 3, "rev": f"{st.st_mtime_ns}-3"})
+
+    def test_a_rewrite_within_the_same_second_changes_the_revision(self):
+        f = webfm.HOME / "plot.png"
+        os.utime(f, ns=(1_700_000_000_100_000_000, 1_700_000_000_100_000_000))
+        before = json.loads(self.stat("/plot.png").body)
+        f.write_bytes(b"two")
+        os.utime(f, ns=(1_700_000_000_900_000_000, 1_700_000_000_900_000_000))
+        after = json.loads(self.stat("/plot.png").body)
+        self.assertEqual(before["mtime"], after["mtime"])
+        self.assertNotEqual(before["rev"], after["rev"])
+
+    def test_missing_files_folders_and_escapes(self):
+        self.assertEqual(self.stat("/gone.png").code, 404)
+        self.assertEqual(self.stat("/sub").code, 404)
+        self.assertEqual(self.stat("/../../../../../../etc/passwd").code, 403)   # /tmp itself is an extra root
+
+    def test_login_required(self):
+        self.assertEqual(self.stat("/plot.png", auth=False).code, 401)
 
 
 class ExtraRootTest(AsyncHTTPTestCase):
