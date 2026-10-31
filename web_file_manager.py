@@ -1557,6 +1557,11 @@ applyTheme(wfmSavedTheme);
     max-width: 100%; max-height: 100%;
     object-fit: contain; display: block;
   }
+  /* an image zooms inside the preview (enableImageZoom), so the preview clips it */
+  .preview.image-mode { overflow: hidden; }
+  .preview.image-mode img { transform-origin: center center; -webkit-user-select: none; user-select: none; }
+  .preview.zoomed img { cursor: grab; }
+  .preview.zoomed.panning img { cursor: grabbing; }
   .preview video {
     width: 100%; height: 100%;
     object-fit: contain; display: block;
@@ -3277,7 +3282,9 @@ function renderPreview(entry) {
     const img = document.createElement("img");
     img.src = fileUrl;
     img.alt = entry.name;
+    pv.classList.add("image-mode");
     pv.appendChild(img);
+    enableImageZoom(pv, img);
     addImageNav(pv);
   } else if (entry.kind === "video") {
     const video = document.createElement("video");
@@ -3624,6 +3631,110 @@ function loadText(entry, force) {
       err.textContent = "加载失败：" + e.message;
       pv.appendChild(err);
     });
+}
+
+// An image zooms inside the preview: two fingers pinch (and move it while pinching),
+// one finger pans a zoomed image, and a double tap zooms in at that spot or back out.
+// With a mouse: a double-click does the same, a drag pans, and a trackpad pinch
+// (ctrl + wheel) zooms. At normal size a one-finger swipe is left to the page, so the
+// panes still swipe on a phone. Each render makes a new <img>, which starts unzoomed.
+const IMG_ZOOM_MAX = 8, IMG_ZOOM_TAP = 2.5;
+function enableImageZoom(pv, img) {
+  let scale = 1, tx = 0, ty = 0, g = null, lastTap = null;
+  const box = () => { const r = pv.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; };
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const pts = (list) => [...list].map((t) => ({ x: t.clientX, y: t.clientY }));
+  function apply() {
+    scale = Math.min(IMG_ZOOM_MAX, Math.max(1, scale));
+    if (scale < 1.001) { scale = 1; tx = ty = 0; }
+    // the image is centred in the preview; it may move only as far as it overhangs
+    const b = box();
+    const mx = Math.max(0, (img.offsetWidth * scale - b.w) / 2), my = Math.max(0, (img.offsetHeight * scale - b.h) / 2);
+    tx = Math.min(mx, Math.max(-mx, tx)); ty = Math.min(my, Math.max(-my, ty));
+    img.style.transform = scale === 1 ? "" : `translate(${tx}px, ${ty}px) scale(${scale})`;
+    img.dataset.zoom = scale.toFixed(2);
+    pv.classList.toggle("zoomed", scale > 1);
+  }
+  // zoom to s, keeping the point of the image that is under (x, y) where it is
+  function zoomAt(s, x, y) {
+    const b = box(), ux = (x - b.x - tx) / scale, uy = (y - b.y - ty) / scale;
+    scale = Math.min(IMG_ZOOM_MAX, Math.max(1, s));
+    tx = x - b.x - ux * scale; ty = y - b.y - uy * scale;
+    apply();
+  }
+  function toggleAt(x, y) { if (scale > 1) { scale = 1; apply(); } else zoomAt(IMG_ZOOM_TAP, x, y); }
+
+  img.addEventListener("touchstart", (e) => {
+    const p = pts(e.touches);
+    if (p.length >= 2) {
+      e.preventDefault();
+      g = { kind: "pinch", d0: Math.max(1, dist(p[0], p[1])), s0: scale, t0x: tx, t0y: ty, m0: mid(p[0], p[1]) };
+      lastTap = null;
+    } else if (p.length === 1) {
+      g = { kind: scale > 1 ? "pan" : "swipe", p0: p[0], t0x: tx, t0y: ty, at: Date.now(), moved: false };
+      if (scale > 1) e.preventDefault();      // a zoomed image takes the finger; otherwise the page swipes
+    }
+  }, { passive: false });
+  img.addEventListener("touchmove", (e) => {
+    if (!g) return;
+    const p = pts(e.touches);
+    if (g.kind === "pinch" && p.length >= 2) {
+      if (e.cancelable) e.preventDefault();
+      const b = box(), m = mid(p[0], p[1]);
+      const ux = (g.m0.x - b.x - g.t0x) / g.s0, uy = (g.m0.y - b.y - g.t0y) / g.s0;
+      scale = Math.min(IMG_ZOOM_MAX, Math.max(1, g.s0 * dist(p[0], p[1]) / g.d0));
+      tx = m.x - b.x - ux * scale; ty = m.y - b.y - uy * scale;
+      apply();
+    } else if (p.length === 1 && g.p0) {
+      if (dist(p[0], g.p0) > 10) g.moved = true;
+      if (g.kind === "pan") {
+        if (e.cancelable) e.preventDefault();
+        tx = g.t0x + p[0].x - g.p0.x; ty = g.t0y + p[0].y - g.p0.y;
+        apply();
+      }
+    }
+  }, { passive: false });
+  img.addEventListener("touchend", (e) => {
+    if (!g) return;
+    const left = pts(e.touches);
+    if (g.kind === "pinch") {
+      // a finger still down carries on as a pan from where it is
+      g = left.length === 1 && scale > 1 ? { kind: "pan", p0: left[0], t0x: tx, t0y: ty, at: 0, moved: true } : left.length ? g : null;
+      return;
+    }
+    if (left.length) return;
+    const tap = !g.moved && Date.now() - g.at < 300 ? g.p0 : null;
+    g = null;
+    if (!tap) { lastTap = null; return; }
+    if (lastTap && Date.now() - lastTap.at < 320 && dist(tap, lastTap) < 30) {
+      e.preventDefault();                       // no click, no double-click after it
+      lastTap = null;
+      toggleAt(tap.x, tap.y);
+    } else lastTap = { ...tap, at: Date.now() };
+  }, { passive: false });
+  img.addEventListener("touchcancel", () => { g = null; });
+  img.addEventListener("gesturestart", (e) => e.preventDefault());   // Safari's own page zoom
+
+  img.addEventListener("dblclick", (e) => { e.preventDefault(); toggleAt(e.clientX, e.clientY); });
+  img.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey) return;                    // a trackpad pinch arrives as ctrl + wheel
+    e.preventDefault();
+    zoomAt(scale * Math.exp(-e.deltaY / 100), e.clientX, e.clientY);
+  }, { passive: false });
+  img.addEventListener("mousedown", (e) => {
+    if (scale === 1 || e.button !== 0) return;
+    e.preventDefault();
+    const x0 = e.clientX, y0 = e.clientY, t0x = tx, t0y = ty;
+    pv.classList.add("panning");
+    const move = (ev) => { tx = t0x + ev.clientX - x0; ty = t0y + ev.clientY - y0; apply(); };
+    const up = () => {
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      pv.classList.remove("panning");
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  });
+  img.addEventListener("dragstart", (e) => { if (scale > 1) e.preventDefault(); });
 }
 
 function addImageNav(pv) {

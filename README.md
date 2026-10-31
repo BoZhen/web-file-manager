@@ -18,7 +18,7 @@ A lightweight single-user web file browser. The interface is rooted at the runni
 - Favorites are collapsed by default; the star on a directory row adds or removes it from favorites.
 - The hidden-file toggle uses closed-eye and open-eye icons to indicate its current state.
 - The path bar accepts absolute paths within `$HOME` or an extra root such as `/tmp`, and supports `/?open=<path>` deep links.
-- Images support previews and left/right navigation within the same directory.
+- Images support previews and left/right navigation within the same directory. They zoom inside the preview: pinch with two fingers on a touch screen (one finger then pans, a double tap zooms in at that spot or back out), or double-click, drag and pinch on a trackpad with a mouse. The next image starts unzoomed.
 - Videos use the browser’s native player, muted by default, with progress seeking and 5-second backward/forward jumps using `←` / `→`. Supported codecs depend on the browser.
 - PDFs open in the local PDF.js viewer.
 - Markdown supports syntax highlighting and `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` LaTeX formulas.
